@@ -34,7 +34,7 @@ At most 3 workers. Your review is the bottleneck, and every worker's diff is you
    ```
 
    baton adds the worker rules itself: stay in the worktree, commit as you go, don't push or merge, finish with a report.
-4. Start each worker: `baton spawn <task> <brief-file>`. `<task>` is a short name like `billing-api`; the branch becomes `baton/<task>`. baton picks the account with the most room that nobody here is using. Pass `--account <id>` only when the user names one, and `--model` or `--permission-mode` only when the user asks.
+4. Start each worker: `baton spawn <task> <brief-file>`. `<task>` is a short name like `billing-api`; the branch becomes `baton/<task>`. baton picks the account with the most room that nobody here is using, then one a worker already uses, and this session's own account last. Pass `--account <id>` only when the user names one, and `--model` or `--permission-mode` only when the user asks.
 5. Wait without spending tokens: run `baton wait` as a background command, so you're notified when every worker has stopped. Do your own share of the work meanwhile, or nothing. Don't poll `baton status` in a loop.
 
 ## Review and merge

@@ -33,7 +33,7 @@ Needs `git`, `jq` and Claude Code. Panes open in [Rex](https://superlogical.com)
 baton reads your accounts from the first of these it finds:
 
 1. `~/.config/baton/accounts`, one account per line: `<name> <CLAUDE_CONFIG_DIR>`. Leave the folder out for your default `~/.claude` login. baton can't see usage this way, so it takes accounts in file order.
-2. [Consolidatex](https://github.com/hazlijohar95/consolidatex)'s `acc ls --json`, which includes each account's usage. baton picks the account with the most quota left, skips any that are capped or at 90% or more, and spreads workers across accounts nobody here is using.
+2. [Consolidatex](https://github.com/hazlijohar95/consolidatex)'s `acc ls --json`, which includes each account's usage. baton picks the account with the most quota left, skips any that are capped or at 90% or more, and spreads workers across accounts nobody here is using. When those run out it doubles up on a worker's account before touching the one your main session runs on.
 3. Your current account alone. Workers still get their own worktrees and panes.
 
 ## Use

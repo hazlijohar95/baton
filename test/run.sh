@@ -137,6 +137,14 @@ $BATON spawn tilde "$(brief x tilde)" --account a >/dev/null; $BATON wait tilde 
 check "a ~ folder from acc is expanded" grep -q "CLAUDE_CONFIG_DIR=$HOME/.claude-a BATON_WORKER=1" "$LOG"
 teardown
 
+setup
+for n in p1 p2 p3; do FAKE_WORK=5 $BATON spawn $n "$(brief x $n)" >/dev/null & done; wait
+accts=$(for n in p1 p2 p3; do jq -r .account "$(git rev-parse --git-common-dir)/baton/$n/state.json"; done | sort | tr '\n' ' ')
+check "workers started at the same moment spread over the free accounts, then reuse a worker's" test "$accts" = "b b d "
+check "no lock is left behind" test ! -d "$(git rev-parse --git-common-dir)/baton/.lock"
+for n in p1 p2 p3; do $BATON done $n --force >/dev/null; done
+teardown
+
 # --- guards ---
 setup
 expect_fail "task names are checked" "lowercase" $BATON spawn "Bad Name" /dev/null
@@ -153,7 +161,7 @@ $BATON spawn setupok "$(brief x so)" >/dev/null
 check ".baton/setup runs in the new worktree" grep -q "setupok from $(pwd -P)" .baton/worktrees/setupok/setup-ran
 $BATON wait --timeout 10 >/dev/null
 FAKE_DIRTY=1 $BATON spawn dirty "$(brief x d)" >/dev/null; $BATON wait dirty --timeout 10 >/dev/null
-expect_fail "done refuses uncommitted work" "uncommitted" $BATON done dirty
+expect_fail "done refuses uncommitted work and names the files" "dirty.txt" $BATON done dirty
 teardown
 
 setup

@@ -68,6 +68,29 @@ tasks() {
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+LOCK=""
+lock() {
+  local tries=0
+  until mkdir "$1" 2>/dev/null; do
+    (( ++tries < 300 )) || die "waited 30s for $1; if no baton spawn is running, remove that folder"
+    sleep 0.1
+  done
+  LOCK=$1
+  trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+}
+
+unlock() { rmdir "$LOCK" 2>/dev/null; LOCK=""; trap - EXIT; }
+
+# Undoes a spawn that failed after reserving its name: worktree, branch and state go.
+ABANDON=""
+abandon() {
+  local root wt branch dir
+  IFS='|' read -r root wt branch dir <<<"$ABANDON"
+  git -C "$root" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  git -C "$root" branch -D "$branch" >/dev/null 2>&1 || true
+  rm -rf "$dir"
+}
+
 # ---------- accounts ----------
 
 canonical_dir() {
@@ -93,27 +116,27 @@ accounts_json() {
   fi
 }
 
-# Canonical config folders already working: this session's and every live worker's.
-busy_dirs() {
-  canonical_dir "${CLAUDE_CONFIG_DIR:-}"; printf '\n'
+# Canonical config folders that live workers run on.
+worker_dirs() {
   local t
   for t in $(tasks); do
     canonical_dir "$(load "$t" | jq -r '.configDir // empty')"; printf '\n'
   done
 }
 
-# The roomiest account with room that nobody here is using; else the roomiest with room.
+# The roomiest account with room that nobody here uses; then one a worker uses; this session's own last,
+# since its quota is usually what the user is trying to save.
 pick_account() {
-  local accounts busy
-  accounts=$(accounts_json)
-  busy=$(busy_dirs | jq -R -s 'split("\n") | map(select(length > 0))')
-  local resolved; resolved=$(jq -c '.[]' <<<"$accounts" | while IFS= read -r a; do
+  local workers main resolved
+  workers=$(worker_dirs | jq -R -s 'split("\n") | map(select(length > 0))')
+  main=$(canonical_dir "${CLAUDE_CONFIG_DIR:-}")
+  resolved=$(accounts_json | jq -c '.[]' | while IFS= read -r a; do
     jq -c --arg dir "$(canonical_dir "$(jq -r '.configDir // empty' <<<"$a")")" '. + {dir: $dir}' <<<"$a"
   done | jq -s '.')
-  jq -r --argjson busy "$busy" '
-    map(select((.capped | not) and ((.load == null) or (.load < 90)))) as $room
-    | (($room | map(select(.dir as $d | $busy | index($d) | not))) + $room)
-    | if length == 0 then empty else .[0].id end' <<<"$resolved"
+  jq -r --argjson workers "$workers" --arg main "$main" '
+    map(select((.capped | not) and ((.load == null) or (.load < 90))))
+    | map(.dir as $d | . + {busy: (if $d == $main then 2 elif ($workers | index($d)) then 1 else 0 end)})
+    | sort_by(.busy, .rank) | if length == 0 then empty else .[0].id end' <<<"$resolved"
 }
 
 account_by_id() {
@@ -200,6 +223,7 @@ contract() {
 You are a baton worker: another Claude Code session handed you one task, and it reads your final message.
 - Work only in this git worktree, $1, on branch $2 (made from $3). Don't touch other worktrees or the main checkout.
 - Commit to this branch as you go, with clear messages, and leave the tree clean when you finish. Don't push, merge, or rebase.
+- Commit source only: never caches, build output or other generated files, even if no .gitignore covers them.
 - Don't start other workers. Stay inside the task you were given; mention anything outside it instead of doing it.
 - If you are blocked or need a decision, stop and ask in one short message.
 - Finish with a short report: what you changed, how you verified it, and anything left open.
@@ -225,32 +249,37 @@ cmd_spawn() {
   done
   need claude
   local root; root=$(main_root)
-  [[ ! -f $(state_file "$task") ]] || die "a worker named '$task' exists; pick another name or run: baton done $task"
+  [[ -n $base ]] || base=$(git -C "$root" symbolic-ref --quiet --short HEAD || git -C "$root" rev-parse HEAD)
+  local branch="baton/$task" wt="$root/.baton/worktrees/$task" dir; dir=$(worker_dir "$task")
+  local sf="$dir/state.json" settings="$dir/settings.json" run="$dir/run.sh" briefcopy="$dir/brief.md"
+  git -C "$root" show-ref --quiet --verify "refs/heads/$branch" && die "branch $branch already exists; delete it or pick another name"
+  local be; be=$(backend)
 
+  # Choosing the account and recording it happen under one lock, so workers started at once spread out.
+  lock "$(state_dir)/.lock"
+  [[ ! -d $dir ]] || die "a worker named '$task' exists; pick another name or run: baton done $task"
   [[ -n $account ]] || account=$(pick_account)
   [[ -n $account ]] || die "no account has room (every one is capped or at 90%+); see: baton accounts"
   local acct; acct=$(account_by_id "$account")
   local config; config=$(jq -r '.configDir // empty' <<<"$acct")
   config=${config/#\~/$HOME}
+  mkdir -p "$dir"
+  jq -n --arg task "$task" --arg account "$account" --arg config "$config" --arg branch "$branch" --arg base "$base" \
+    --arg wt "$wt" --arg be "$be" --arg at "$(now)" \
+    '{task: $task, account: $account, configDir: (if $config == "" then null else $config end), branch: $branch, base: $base,
+      worktree: $wt, backend: $be, pane: null, sessionId: null, state: "starting", lastMessage: null, startedAt: $at, updatedAt: $at}' >"$sf"
+  ABANDON="$root|$wt|$branch|$dir"
+  unlock
+  trap abandon EXIT
 
-  [[ -n $base ]] || base=$(git -C "$root" symbolic-ref --quiet --short HEAD || git -C "$root" rev-parse HEAD)
-  local branch="baton/$task" wt="$root/.baton/worktrees/$task"
-  git -C "$root" show-ref --quiet --verify "refs/heads/$branch" && die "branch $branch already exists; delete it or pick another name"
   local exclude; exclude=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)/info/exclude
   mkdir -p "$(dirname "$exclude")"
   grep -qxF '/.baton/worktrees/' "$exclude" 2>/dev/null || printf '/.baton/worktrees/\n' >>"$exclude"
   git -C "$root" worktree add --quiet -b "$branch" "$wt" "$base"
-
   if [[ -x $root/.baton/setup ]]; then
-    (cd "$wt" && BATON_MAIN="$root" BATON_TASK="$task" "$root/.baton/setup") || {
-      git -C "$root" worktree remove --force "$wt"; git -C "$root" branch -D "$branch" >/dev/null
-      die ".baton/setup failed; worktree removed"
-    }
+    (cd "$wt" && BATON_MAIN="$root" BATON_TASK="$task" "$root/.baton/setup") || die ".baton/setup failed; worktree removed"
   fi
 
-  local dir; dir=$(worker_dir "$task")
-  mkdir -p "$dir"
-  local sf="$dir/state.json" settings="$dir/settings.json" run="$dir/run.sh" briefcopy="$dir/brief.md"
   cp "$brief" "$briefcopy"
   local hook; hook="$(printf %q "$SELF") _hook"
   jq -n --arg h "$hook" --arg t "$task" '{hooks: {
@@ -268,14 +297,9 @@ cmd_spawn() {
     printf 'exec'; printf ' %q' "${args[@]}"; printf ' "$(cat %q)"\n' "$briefcopy"
   } >"$run"
 
-  local be; be=$(backend)
-  jq -n --arg task "$task" --arg account "$account" --arg config "$config" --arg branch "$branch" --arg base "$base" \
-    --arg wt "$wt" --arg be "$be" --arg at "$(now)" \
-    '{task: $task, account: $account, configDir: (if $config == "" then null else $config end), branch: $branch, base: $base,
-      worktree: $wt, backend: $be, pane: null, sessionId: null, state: "starting", lastMessage: null, startedAt: $at, updatedAt: $at}' >"$sf"
-
-  local pane; pane=$(open_pane "$task" "$wt" "$run" "$be") || { cmd_done "$task" --force >/dev/null 2>&1 || true; die "could not open a pane for $task"; }
+  local pane; pane=$(open_pane "$task" "$wt" "$run" "$be") || die "could not open a pane for $task; worktree removed"
   update "$sf" --arg p "$pane" '.pane = (if $p == "" then null else $p end)'
+  trap - EXIT
   say "$task: on $account, branch $branch, worktree $wt"
   [[ $be == manual ]] && say "no Rex or tmux here; start it yourself in another terminal: bash $(printf %q "$run")"
   return 0
@@ -356,8 +380,11 @@ cmd_done() {
   local root wt branch base be pane
   root=$(main_root); wt=$(jq -r .worktree <<<"$s"); branch=$(jq -r .branch <<<"$s"); base=$(jq -r .base <<<"$s")
   be=$(jq -r .backend <<<"$s"); pane=$(jq -r '.pane // empty' <<<"$s")
-  if [[ -d $wt ]] && (( ! force )) && [[ -n $(git -C "$wt" status --porcelain) ]]; then
-    die "$task has uncommitted changes in $wt; commit or discard them, or run: baton done $task --force"
+  if [[ -d $wt ]] && (( ! force )); then
+    local changes; changes=$(git -C "$wt" status --porcelain --untracked-files=all | head -8)
+    [[ -z $changes ]] || die "$task's worktree has files not committed to $branch:
+$changes
+Commit what matters, or if it's build output or caches, run: baton done $task --force"
   fi
   local merged=0
   git -C "$root" merge-base --is-ancestor "$branch" "$base" 2>/dev/null && merged=1
