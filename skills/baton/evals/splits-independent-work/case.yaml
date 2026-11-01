@@ -1,0 +1,8 @@
+schema_version: "1.1"
+name: splits-independent-work
+expected_outcome: |
+  Three baton workers start, one per TODO item, each brief naming its own files, a checkable done condition and how
+  to verify. The main session waits in the background, reviews each branch's diff, merges the branches into main one
+  at a time with the tests run, and runs `baton done` for every worker so none is left behind.
+context:
+  scaffold_script: place-files.sh

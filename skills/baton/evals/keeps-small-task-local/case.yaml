@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: keeps-small-task-local
+expected_outcome: |
+  The rename is a small mechanical change across a handful of files, so no worker starts. The main session does the
+  rename itself, keeps the tests passing, and tells the user why it didn't hand off.
+context:
+  scaffold_script: place-files.sh

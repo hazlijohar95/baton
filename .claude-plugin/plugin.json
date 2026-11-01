@@ -1,0 +1,8 @@
+{
+  "name": "baton",
+  "version": "0.1.0",
+  "description": "Hand Claude Code work to parallel worker sessions, each on the subscription account with the most quota left and its own git worktree, in Rex or tmux panes.",
+  "author": { "name": "Hazli Johar" },
+  "license": "MIT",
+  "keywords": ["parallel", "worktree", "accounts", "quota", "tmux", "rex"]
+}

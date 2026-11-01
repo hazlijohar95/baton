@@ -1,0 +1,8 @@
+schema_version: "1.1"
+name: refuses-overlapping-parallel
+expected_outcome: |
+  Both changes edit the same function, so two parallel workers would conflict at merge. The main session says so and
+  does not start two workers on createOrder at once: it uses one worker for both changes, runs them one after the
+  other, or does the work itself.
+context:
+  scaffold_script: place-files.sh
