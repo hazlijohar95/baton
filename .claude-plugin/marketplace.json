@@ -1,7 +1,14 @@
 {
   "name": "baton",
-  "owner": { "name": "Hazli Johar" },
+  "description": "baton: hand Claude Code work to parallel worker sessions on the accounts with the most quota left.",
+  "owner": {
+    "name": "Hazli Johar"
+  },
   "plugins": [
-    { "name": "baton", "source": "./", "description": "Hand Claude Code work to parallel worker sessions on the accounts with the most quota left." }
+    {
+      "name": "baton",
+      "source": "./",
+      "description": "Hand Claude Code work to parallel worker sessions on the accounts with the most quota left."
+    }
   ]
 }
