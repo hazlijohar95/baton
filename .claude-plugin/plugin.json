@@ -4,5 +4,7 @@
   "description": "Hand Claude Code work to parallel worker sessions, each on the subscription account with the most quota left and its own git worktree, in Rex or tmux panes.",
   "author": { "name": "Hazli Johar" },
   "license": "MIT",
+  "homepage": "https://github.com/hazlijohar95/baton",
+  "repository": "https://github.com/hazlijohar95/baton",
   "keywords": ["parallel", "worktree", "accounts", "quota", "tmux", "rex"]
 }
